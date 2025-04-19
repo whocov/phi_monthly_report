@@ -1,0 +1,772 @@
+## **Part B - Deep Dive – WHO `r selected.region` Region**
+
+## **WHO `r selected.region`: Trend - RRA, EIS, DON by month**
+
+```{r, include=FALSE}
+# REGION PROCESSING
+df_regions <- read.csv('country_region.csv') %>%
+  as.data.frame(.) %>%
+  rename(country=countryName,
+         region=Region) %>%
+  mutate(region = 
+           ifelse(country %in% c('AMERICAN SAMOA', 'GUAM'), 'AMRO', region),
+         country=toupper(country))
+
+df_regions_parentheses <- df_regions %>% 
+  filter(grepl(' \\((.*?)\\)', country)) %>% 
+  mutate(country = ifelse(grepl('HONG KONG', country), 'HONG KONG', country),
+         country = ifelse(grepl('MACAO', country), 'MACAO', country),
+         country = ifelse(grepl('TAIWAN', country), 'TAIWAN', country),
+         country = str_remove(country, ' \\((.*?)\\)')) #Removes the parentheses
+
+df_regions_more_countries <- df_regions %>%
+  filter(grepl('UNITED STATES OF AMERICA|CÔTE|BOLIVIA|UNITED KINGDOM|CHINA ', country)) %>%
+  arrange(country) %>%
+  mutate(country = c('BOLIVIA (PLURINATIONAL STATE OF)', 
+                     'COTE D\'IVOIRE',
+                     'CHINA, HONG KONG',
+                     'CHINA, MACAO',
+                     'CHINA, PROVINCE OF TAIWAN',
+                     'UNITED KINGDOM OF GREAT BRITAIN AND NORTHERN IRELAND',
+                     'UNITED STATES')) %>%
+  add_case(country='UK', iso3='GBR', iso2='GB', region='EURO') #Example of how to add more cases by hand
+
+
+# Add countries with different formats
+df_regions <- rbind(df_regions,
+                    df_regions_parentheses,
+                    df_regions_more_countries) %>%
+  distinct(.keep_all = T)
+
+
+# Recode country names so that it's easier to manipulate 
+df_pt$country <- toupper(df_pt$country)
+# df_pt$country[1] <- 'ETHIOPIA' 
+
+#create data.frame where countries are linked to Region so that you can easily extract data from product tracker (only by country)
+# df_pt2 <- full_join(df_regions, df_pt, by = c('country' = 'country')) %>%
+#   filter(!is.na(status))
+# df_pt3 <- df_pt2
+
+# NEIL, I CHANGED THE COUNTRY RECOGNITION.
+# Instead of doing the full join in line 57, it now search for each country in df_regions in the the product tracker. This way it will find the countries even if the string does not match exactly and assign the region.
+
+# Adding the region to the countries in the product tracker
+df_pt2 <- df_pt %>%
+  mutate(region = NA)
+for(country.query in df_regions$country){
+  
+  pos <- grep(toupper(country.query), toupper(df_pt2$country))
+  
+  if(length(pos) >= 1){
+    df_pt2$region[pos] <- df_regions %>% 
+      filter(country==country.query) %>% 
+      pull(region)
+  }
+}
+
+
+
+# # Countries with empty region and not MULTIPLE
+df_pt_unmatched <- df_pt2 %>%
+  filter(is.na(region) & country!='MULTIPLE') %>%
+  select(country, region)
+
+if(nrow(df_pt_unmatched) >=1){
+  unmatched_countries <- df_pt2 %>%
+    filter(is.na(region) & country!='MULTIPLE') %>%
+    pull(country)
+} else {
+  unmatched_countries <- 'No unmatched countries.'
+}
+
+
+# Recode ummatched countries
+# for(country.query in df_regions$country){
+#   
+#   grep(toupper(df_pt_unmatched$country),
+#        country.query)
+#   pos <- grep(country.query,
+#               toupper(df_pt_unmatched$country))
+#   
+#   if(length(pos)>=1){
+#     region <- df_regions %>% filter(country==country.query) %>% pull(country)
+#     
+#     df_pt_unmatched$country[pos] <- paste(df_pt_unmatched$country[pos], region, sep=', ')
+#   }
+# }
+
+
+
+# Recode country_region
+for(country.query in df_regions$country){
+  pos <- grep(ifelse(nchar(country.query)==2, 
+                     country.query,
+                     simpleCap(country.query)), 
+              df_pt2$country_region)
+  
+  if(length(pos)>=1){
+    region <- df_regions %>% filter(country==country.query) %>% pull(region)
+    
+    df_pt2$country_region[pos] <- str_replace(df_pt2$country_region[pos],
+                                              ifelse(nchar(country.query)==2, 
+                                                     country.query,
+                                                     simpleCap(country.query)), 
+                                              region)
+  }
+}
+
+# View(cbind(df_pt3 %>% filter(is.na(region)) %>%select(country, region, country_region),
+#            df_pt2 %>% filter(is.na(region)) %>%select(country_region)))
+# View(df_pt2 %>% select(country, region, country_region))
+
+
+
+
+# Filter for the region - rbinds filter for selected.region in region or in country.region
+df_pt_region <- rbind(
+  
+  df_pt2 %>%
+    filter(region==toupper(selected.region)),
+  
+  df_pt2 %>%
+    filter(is.na(region) & grepl(toupper(selected.region), toupper(country_region)))
+)
+
+
+if(selected.region=='Global'){
+  df_pt_region <- df_pt2 %>%
+    filter(grepl('Global|GLOBAL|global', region) | grepl('Global|GLOBAL|global', country_region))
+}
+
+
+# # Get the Global products
+# df_pt_region_global <- df_pt2 %>%
+#   filter(grepl('Global|GLOBAL|global', region) | grepl('Global|GLOBAL|global', country_region))
+
+
+```
+
+
+```{r include=FALSE}
+# DON TRACKER PROCESSING
+# Filter the DON tracker
+df_don_region <- df_don %>% 
+  mutate(region = str_replace_all(region, 'PAHO', 'AMRO')) %>%
+  filter(grepl(toupper(selected.region), toupper(region)))
+
+# Position of nmatched regions in DON
+don.unmatched.regions.pos <- which(grepl('AFRO|EMRO|SEARO|EURO|WPRO|PAHO|MULTIPLE',
+                                         toupper(df_don$region))==FALSE)
+
+
+# Fetch the regions of the countries with no region
+don.unmatched.regions.fetch <- c()
+for(country.query in df_don$country[don.unmatched.regions.pos]){
+  don.unmatched.regions.fetch <- c(
+    
+    don.unmatched.regions.fetch,
+    
+    ifelse(length(df_regions$region[toupper(df_regions$country)==toupper(country.query)])==0, 
+           NA,      
+           df_regions$region[df_regions$country==country.query])
+  )
+}
+
+
+# Change the regions
+df_don_unmatched <- df_don[don.unmatched.regions.pos,] %>%
+  mutate(region = don.unmatched.regions.fetch)
+
+
+# Add the fetched regions to the df_don_region
+df_don_unmatched_region <- df_don_unmatched %>%
+  filter(grepl(toupper(selected.region), toupper(region)))
+
+if(nrow(df_don_unmatched_region) > 0){ #Only rbinds if there are any entries
+  df_don_region <- rbind(
+    df_don_region,
+    df_don_unmatched_region)
+}
+
+
+```
+
+
+## **WARNING** Countries and regions in non-standard format - Please edit the DON tracker or the Product Tracker to correct these
+
+:::: {.columns}
+::: {.column}
+
+The following entries in the DON Tracker do not have a region:
+
+```{r, results='asis', ft.align='left', ft.top=2.8}
+df_don_unmatched %>% 
+  filter(is.na(region)) %>% 
+  select(ID, disease, country, region) %>% 
+  flextable() %>% 
+  width(j=1:4, width=1)
+```
+
+:::
+::: {.column}
+The following countries have non-standard names that are not recognized, please check the product tracker:
+
+* `r paste(paste0('(', 1:length(unmatched_countries),') ', unmatched_countries), collapse = '; ')`
+:::
+::::
+
+
+
+```{r include=FALSE}
+# Merge dataframe of information products
+# Create data.frame with NAs if nrow of df_XXX_count_region is 0. Then remove after full_join
+# df_prod_count
+df_rra_count_region <- df_pt_region %>% 
+  filter(RRA=='Yes') %>% 
+  filter(RRA_pub_year_month > as.Date(as.yearmon(report.month)) %m-% months(7)) %>% #E.g. For December we would do June
+  group_by (RRA_pub_year_month) %>% 
+  summarise(sum.rra.region=n())
+
+if(nrow(df_rra_count_region)==0){
+  df_rra_count_region <- data.frame(
+    RRA_pub_year_month = df_prod_count$pub_year_month,
+    sum.rra.region = rep(0, times=length(df_prod_count$pub_year_month))
+  )
+}
+
+df_eis_count_region <- df_pt_region %>% 
+  filter(EIS=='Yes') %>%
+  filter(EIS_pub_year_month > as.Date(as.yearmon(report.month)) %m-% months(7)) %>% 
+  group_by(EIS_pub_year_month) %>% 
+  summarise(sum.eis.region=n())
+
+if(nrow(df_eis_count_region)==0){
+  df_eis_count_region <- data.frame(
+    EIS_pub_year_month = df_prod_count$pub_year_month,
+    sum.eis.region = rep(0, times=length(df_prod_count$pub_year_month))
+  )
+}
+
+df_don_count_region <- df_don_region %>% 
+  filter(status=='Published') %>% 
+  filter(DON_pub_year_month > as.Date(as.yearmon(report.month)) %m-% months(7)) %>% 
+  filter(!is.na(DON_pub_year_month)) %>% 
+  group_by (DON_pub_year_month) %>% 
+  summarise(sum.don.region=n())
+
+if(nrow(df_don_count_region)==0){
+  df_don_count_region <- data.frame(
+    DON_pub_year_month = df_prod_count$pub_year_month,
+    sum.don.region = rep(0, times=length(df_prod_count$pub_year_month))
+  )
+}
+
+#rename colnames
+colnames(df_rra_count_region)[1] <- 'pub_year_month'
+colnames(df_eis_count_region)[1] <- 'pub_year_month'
+colnames(df_don_count_region)[1] <- 'pub_year_month'
+
+# create new dataframe
+df_prod_count_region <- df_eis_count_region %>% 
+  full_join(df_rra_count_region, by='pub_year_month') %>% 
+  full_join(df_don_count_region, by='pub_year_month') 
+df_prod_count_region[is.na(df_prod_count_region)] <- 0
+df_prod_count_region <- df_prod_count_region %>%
+  mutate(current.region = sum.eis.region + sum.rra.region + sum.don.region)
+
+#count min and max of totals in the preceding 6 months
+# df_prod_count_region %>% 
+#   filter(pub_year_month < '2022-10-01') %>% 
+#   mutate(min=min(current.region), 
+#          max=max(current.region))
+
+# Overall
+df_prod_count_region <- merge(df_prod_count_region, df_prod_count, by='pub_year_month')
+df_prod_count_region <- df_prod_count_region %>% 
+  mutate(percentage=round(current.region/total*100,0), 
+         eis.percentage=round(sum.eis.region/sum.eis*100,0),
+         rra.percentage=round(sum.rra.region/sum.rra*100,0),
+         don.percentage=round(sum.don.region/sum.don*100,0))
+```
+
+
+## WHO `r selected.region`: Bar chart of products over time - by product
+
+::: columns
+::: column
+```{r fig.width=3.75, fig.height=4}
+#create dataframe
+df_fig_count_region <- df_prod_count_region %>% 
+  select(pub_year_month, sum.eis.region ,sum.rra.region, sum.don.region, current.region) %>%  
+  filter(pub_year_month > as.Date(as.yearmon(report.month)) %m-% months(7)) %>% 
+  gather(key='product', value='number', 2:5)
+
+df_fig_count_region_per<-df_prod_count_region %>% select(pub_year_month,eis.percentage,rra.percentage,don.percentage, percentage) %>%  
+  filter(pub_year_month < as.Date(as.yearmon(report.month)) %m+% months(1)) %>% 
+  gather( key='product', value='number', 2:5)
+
+#rename values
+df_fig_count_region$product[df_fig_count_region$product=='sum.eis.region'] <- 'EIS published'
+df_fig_count_region$product[df_fig_count_region$product=='sum.rra.region'] <- 'RRA published'
+df_fig_count_region$product[df_fig_count_region$product=='sum.don.region'] <- 'DON published'
+df_fig_count_region$product[df_fig_count_region$product==tolower('current.region')] <- 'All information products published'
+
+#rename values
+df_fig_count_region_per$product[df_fig_count_region_per$product=='eis.percentage'] <- 'EIS published (% of all globally)'
+df_fig_count_region_per$product[df_fig_count_region_per$product=='rra.percentage'] <- 'RRA published (% of all globally)'
+df_fig_count_region_per$product[df_fig_count_region_per$product=='don.percentage'] <- 'DON published (% of all globally)'
+df_fig_count_region_per$product[df_fig_count_region_per$product=='percentage'] <- 'All information products published (% of all globally)'
+
+#create factor variable
+df_fig_count_region$product <-factor(df_fig_count_region$product,  levels = c('All information products published', 'RRA published', 'EIS published', 'DON published'))
+
+df_fig_count_region_per$product <-factor(df_fig_count_region_per$product,  levels = c('All information products published (% of all globally)', 'RRA published (% of all globally)', 'EIS published (% of all globally)', 'DON published (% of all globally)'))
+
+# create figures information products published over time
+fig_infoprod_region <- ggplot(data=df_fig_count_region, aes(x = pub_year_month, y = number)) +
+  geom_bar(stat='identity', colour='black', fill='#0072B2') +
+  geom_text(aes(label = number, vjust=-0.4) ) +
+  scale_x_date(date_breaks = '1 month', date_labels = '%b-%y') +
+  expand_limits(y=c(0, max(df_fig_count_region$number) + 5)) +
+  theme(axis.ticks=element_blank()) +
+  labs(x='', y='Number') +
+  facet_wrap(.~product, nrow = 4) +
+  theme_bw() +
+  theme(legend.position='none')
+
+fig_infoprod_region
+
+```
+:::
+::: column
+```{r, results='asis', fig.width=3.75, fig.height=4}
+# create figures information products published over time
+fig_infoprod_region_per <- ggplot(data=df_fig_count_region_per, aes(x = pub_year_month, y = number)) +
+  geom_bar(stat='identity', colour='black', fill='#0072B2') +
+  geom_text(aes(label = number, vjust=-0.4) ) +
+  scale_x_date(date_breaks = '1 month', date_labels = '%b-%y') +
+  expand_limits(y=c(0,100)) +
+  theme(axis.ticks=element_blank()) +
+  labs(x='', y='Percentage') +
+  facet_wrap(.~product, nrow = 4) +
+  theme_bw() +
+  theme(legend.position='none')
+
+fig_infoprod_region_per
+
+```
+
+:::
+:::
+
+
+
+## WHO `r selected.region`: Data by disease and month-year
+```{r include=FALSE}
+df_rra_dy_count_region <- df_pt_region %>% filter(RRA=='Yes') %>% 
+  filter(RRA_pub_year_month > 
+           as.Date(as.yearmon(report.month)) %m-% months(7)) %>% 
+  group_by (RRA_pub_year_month, disease) %>% 
+  summarise(sum.rra=n())
+
+df_eis_dy_count_region <- df_pt_region %>% filter(EIS=='Yes') %>%
+  filter(EIS_pub_year_month > 
+           as.Date(as.yearmon(report.month)) %m-% months(7)) %>% 
+  group_by (EIS_pub_year_month, disease) %>% 
+  summarise(sum.eis=n())
+
+df_don_dy_count_region <- df_don_region %>% filter(status=='Published') %>% 
+  filter(DON_pub_year_month > 
+           as.Date(as.yearmon(report.month)) %m-% months(7)) %>% 
+  filter(!is.na(DON_pub_year_month)) %>% 
+  group_by (DON_pub_year_month, disease) %>% 
+  summarise(sum.don=n())
+
+#rename colnames
+colnames(df_rra_dy_count_region)[1] <- 'pub_year_month'
+colnames(df_eis_dy_count_region)[1] <- 'pub_year_month'
+colnames(df_don_dy_count_region)[1] <- 'pub_year_month'
+
+#rename values in disease column
+df_rra_dy_count_region$disease[str_sub(df_rra_dy_count_region$disease, 1,5)=="Avian"] <- "Avian influenza"
+df_rra_dy_count_region$disease[str_sub(df_rra_dy_count_region$disease, 1,5)=="Shige"] <- "Shigellosis"
+df_rra_dy_count_region$disease[str_sub(df_rra_dy_count_region$disease, 1,5)=="Crime"] <- "Crimean-Congo hemorrhagic fever"
+df_rra_dy_count_region$disease[str_sub(df_rra_dy_count_region$disease, 1,5)=="Monke"] <- "mpox"
+df_rra_dy_count_region$disease[str_sub(df_rra_dy_count_region$disease, 1,5)=="Lassa"] <- "Lassa fever"
+df_rra_dy_count_region$disease[str_sub(df_rra_dy_count_region$disease, 1,5)=="Yello"] <- "Yellow fever"
+df_rra_dy_count_region$disease[str_sub(df_rra_dy_count_region$disease, 1,5)=="Polio"] <- "Polio"
+df_rra_dy_count_region$disease[str_sub(df_rra_dy_count_region$disease, 1,4)=="Wild"] <- "Polio"
+df_rra_dy_count_region$disease[df_rra_dy_count_region$disease=="Hepatitis (unspecified)"] <- "Acute hepatitis of unknown aetiology"
+
+df_eis_dy_count_region$disease[str_sub(df_eis_dy_count_region$disease, 1,5)=="Avian"] <- "Avian influenza"
+df_eis_dy_count_region$disease[str_sub(df_eis_dy_count_region$disease, 1,5)=="Swine"] <- "Swine influenza"
+df_eis_dy_count_region$disease[str_sub(df_eis_dy_count_region$disease, 1,5)=="Influ"] <- "Avian influenza"
+df_eis_dy_count_region$disease[str_sub(df_eis_dy_count_region$disease, 1,5)=="Shige"] <- "Shigellosis"
+df_eis_dy_count_region$disease[str_sub(df_eis_dy_count_region$disease, 1,5)=="Crime"] <- "Crimean-Congo hemorrhagic fever"
+df_eis_dy_count_region$disease[str_sub(df_eis_dy_count_region$disease, 1,5)=="Polio"] <- "Polio"
+df_eis_dy_count_region$disease[str_sub(df_eis_dy_count_region$disease, 1,4)=="Wild"] <- "Polio"
+df_eis_dy_count_region$disease[str_sub(df_eis_dy_count_region$disease, 1,5)=="Monke"] <- "mpox"
+df_eis_dy_count_region$disease[str_sub(df_eis_dy_count_region$disease, 1,5)=="Yello"] <- "Yellow fever"
+df_eis_dy_count_region$disease[df_eis_dy_count_region$disease=="Acute febrile jaundice syndrome"] <- "Acute hepatitis of unknown aetiology"
+df_eis_dy_count_region$disease[df_eis_dy_count_region$disease=="Hepatitis (unspecified)"] <- "Acute hepatitis of unknown aetiology"
+
+df_don_dy_count_region$disease[str_sub(df_don_dy_count_region$disease, 1,5)=="Dengu"] <- "Dengue"
+df_don_dy_count_region$disease[str_sub(df_don_dy_count_region$disease, 1,5)=="Influ"] <- "Avian influenza"
+df_don_dy_count_region$disease[str_sub(df_don_dy_count_region$disease, 1,5)=="Infue"] <- "Avian influenza"
+df_don_dy_count_region$disease[str_sub(df_don_dy_count_region$disease, 1,5)=="Avian"] <- "Avian influenza"
+df_don_dy_count_region$disease[str_sub(df_don_dy_count_region$disease, 1,5)=="Monke"] <- "mpox"
+df_don_dy_count_region$disease[str_sub(df_don_dy_count_region$disease, 1,5)=="Lassa"] <- "Lassa fever"
+df_don_dy_count_region$disease[str_sub(df_don_dy_count_region$disease, 1,5)=="Circu"] <- "Polio"
+df_don_dy_count_region$disease[str_sub(df_don_dy_count_region$disease, 1,4)=="Wild"] <- "Polio"
+df_don_dy_count_region$disease[str_sub(df_don_dy_count_region$disease, 1,5)=="Wild "] <- "Polio"
+df_don_dy_count_region$disease[str_sub(df_don_dy_count_region$disease, 1,5)=="cVDPV"] <- "Polio"
+df_don_dy_count_region$disease[str_sub(df_don_dy_count_region$disease, 1,5)=="WPV1"] <- "Polio"
+df_don_dy_count_region$disease[str_sub(df_don_dy_count_region$disease, 1,5)=="Marbu"] <- "Marburg"
+df_don_dy_count_region$disease[str_sub(df_don_dy_count_region$disease, 1,3)=="XDR"] <- "Shigellosis"
+df_don_dy_count_region$disease[str_sub(df_don_dy_count_region$disease, 1,5)=="Yello"] <- "Yellow fever"
+df_don_dy_count_region$disease[df_don_dy_count_region$disease=="Acute hepatitis of unknown aetiology in children - Multi-country"] <- "Acute hepatitis of unknown aetiology"
+df_don_dy_count_region$disease[df_don_dy_count_region$disease=="Sudan Virus disease"] <- "Sudan virus disease"
+df_don_dy_count_region$disease[df_don_dy_count_region$disease=="Invasive Group A Streptococcus infection"] <- "Scarlet fever and invasive Group A Streptococcus infection"
+
+# create new dataframe
+df_prod_dy_count_region <- df_eis_dy_count_region %>% 
+  full_join(df_rra_dy_count_region, by=c('pub_year_month', 'disease')) %>%
+  full_join(df_don_dy_count_region, by=c('pub_year_month', 'disease')) 
+
+df_prod_dy_count_region[is.na(df_prod_dy_count_region)] <- 0
+
+df_prod_dy_count_region <- df_prod_dy_count_region %>%
+  mutate(total=sum.eis+sum.rra+sum.don)
+
+#assess totals per month
+# df_prod_dy_count_region
+```
+
+```{r fig.width=35, fig.height=20}
+#create dataframe
+df_fig_dy_count_region <- df_prod_dy_count_region %>% 
+  filter(pub_year_month < as.Date(as.yearmon(report.month)) %m+% months(1)) %>% 
+  gather(key='product', value='Number', 3:6)
+
+#rename values
+df_fig_dy_count_region$product[df_fig_dy_count_region$product=='sum.eis'] <- 'EIS'
+df_fig_dy_count_region$product[df_fig_dy_count_region$product=='sum.rra'] <- 'RRA'
+df_fig_dy_count_region$product[df_fig_dy_count_region$product=='sum.don'] <- 'DON'
+df_fig_dy_count_region$product[df_fig_dy_count_region$product=='total'] <- 'All info products'
+
+#create factor variable
+df_fig_dy_count_region$product <- factor(df_fig_dy_count_region$product,  levels = c('All info products', 'RRA', 'EIS', 'DON'))
+
+# create figures information products published over time
+df_fig_dy_count_region$disease <- with(df_fig_dy_count_region, 
+                                       factor(disease, 
+                                              levels = rev(sort(unique(disease)))))
+
+
+Fig_heatmap_prod_region <- ggplot(df_fig_dy_count_region,
+                                  aes(pub_year_month, disease, fill=Number)) +
+  geom_tile(color='white', 
+            size=0.1, 
+            height=ifelse(length(unique(df_fig_dy_count_region$disease)) <= 5, 0.5, 0.2)) + 
+  scale_x_date(date_breaks = '1 month', date_labels = '%b-%y') +
+  labs(x='Date', y='') +
+  facet_wrap(.~product, nrow = 1) +
+  scale_fill_gradient(low = 'white', high = '#0072B2') +
+  theme_bw() +
+  # guides(fill=guide_legend(title='Number')) + # label legend title
+  theme(axis.ticks=element_blank(),
+        axis.text.x=element_text(angle=45, hjust=1.1, size=35),
+        axis.text.y=element_text(size=40),
+        panel.grid.major = element_blank(),
+        strip.text = element_text(size=40),
+        legend.key.size = unit(1.25, 'in'),
+        legend.title = element_text(size=35),
+        legend.text = element_text(size=35))
+
+Fig_heatmap_prod_region
+
+```
+
+
+
+```{r}
+# Get months to assess
+months <- unique(df_eis_time %>% 
+                   filter(EIS_pub_year_month > 
+                            as.Date(as.yearmon(report.month)) %m-% months(7) & 
+                            EIS_pub_year_month < 
+                            as.Date(as.yearmon(report.month)) %m+% months(1)) %>%
+                   pull(EIS_pub_year_month))
+```
+
+
+## WHO `r selected.region`: Timeliness Summary Metrics
+
+```{r}
+# RRA
+#create dataframe and create variable time between decision and publication
+df_rra_time_region <- df_pt_region %>% 
+  filter(RRA=='Yes') %>%
+  mutate(time_rra=as.numeric(RRA_date_publication-RRA_date_decision)) %>% 
+  data.frame() %>%
+  filter(RRA_pub_year_month!='1990-01-01') %>% 
+  filter(RRA_pub_year_month > as.Date(as.yearmon(report.month)) %m-% months(7) & 
+           RRA_pub_year_month < as.Date(as.yearmon(report.month)) %m+% months(1)) 
+
+
+# Detect if all months are present
+rra.missing.months <- as.Date(
+  setdiff(months, 
+          unique(df_rra_time_region$RRA_pub_year_month)))
+
+# Add row with 0 value for missing month
+if(length(rra.missing.months) > 0){
+  df_rra_time_region <- df_rra_time_region %>%
+    add_row(RRA_pub_year_month = rra.missing.months, 
+            time_rra=rep(NA, times=length(rra.missing.months)))
+}
+
+```
+
+```{r}
+# EIS
+#create dataframe and create variable time between decision and publication
+df_eis_time_region <- df_pt_region %>% 
+  filter(EIS=='Yes',
+         EIS_date_publication != '1990-01-01') %>%
+  mutate(time_eis=as.numeric(EIS_date_publication-EIS_date_decision)) %>%
+  data.frame()  %>% 
+  filter(EIS_pub_year_month > as.Date(as.yearmon(report.month)) %m-% months(7) & 
+           EIS_pub_year_month < as.Date(as.yearmon(report.month)) %m+% months(1))
+
+
+# Detect if all months are present
+eis.missing.months <- as.Date(
+  setdiff(months, 
+          unique(df_eis_time_region$EIS_pub_year_month)))
+
+# Add row with 0 value for missing month
+if(length(eis.missing.months) > 0){
+  df_eis_time_region <- df_eis_time_region %>%
+    add_row(EIS_pub_year_month = eis.missing.months, 
+            time_eis=rep(NA, times=length(eis.missing.months)))
+}
+
+```
+
+```{r}
+# DON
+#create time variable
+df_don_time_region <- df_don_region %>% 
+  filter(status=='Published') %>% 
+  filter(DON_pub_year_month > as.Date(as.yearmon(report.month)) %m-% months(7) & 
+           DON_pub_year_month < as.Date(as.yearmon(report.month)) %m+% months(1)) %>% 
+  mutate(time_don=as.numeric(DON_date_publication-EIS_date_publication))
+
+# Detect if all months are present
+don.missing.months <- as.Date(
+  setdiff(months, 
+          unique(df_don_time_region$DON_pub_year_month)))
+
+# Add row with 0 value for missing month
+if(length(don.missing.months) > 0){
+  df_don_time_region <- df_don_time_region %>%
+    add_row(DON_pub_year_month = don.missing.months, 
+            time_don=rep(NA, times=length(don.missing.months)))
+}
+```
+
+
+
+
+```{r}
+# RRA timeliness
+rra.timeliness <- merge(
+  data.frame(Month = months),
+  df_rra_time_region %>% 
+    select(RRA_pub_year_month, time_rra),
+  by.x='Month', 
+  by.y='RRA_pub_year_month'
+) %>%
+  data.frame(.) %>%
+  group_by(Month) %>%
+  summarize(
+    rra.n = n(),
+    rra.median = median(time_rra, na.rm = TRUE),
+    rra.iqr = paste0(round(as.numeric(quantile(time_rra, probs=c(0.25), 
+                                               na.rm=TRUE)), 0),
+                     '-',
+                     round(as.numeric(quantile(time_rra, probs=c(0.75), 
+                                               na.rm=TRUE)), 0)),
+    rra.min.max = paste0(min(time_rra),'-',max(time_rra))
+  ) %>%
+  mutate(Month = format(as.Date(Month), '%b %Y'),
+         rra.n = ifelse(is.na(rra.median), 0, rra.n),
+         rra.median = ifelse(is.na(rra.median), '-', rra.median),
+         rra.iqr = str_replace_all(rra.iqr, 'NA', ''),
+         rra.iqr = ifelse(rra.n==1, '-', rra.iqr),
+         rra.min.max = str_replace_all(rra.min.max, 'NA', ''),
+         rra.min.max = ifelse(rra.n==1, '-', rra.min.max))
+# rra.timeliness
+
+# EIS timeliness
+eis.timeliness <- merge(
+  data.frame(Month = months),
+  df_eis_time_region %>% 
+    select(EIS_pub_year_month, time_eis),
+  by.x='Month', 
+  by.y='EIS_pub_year_month'
+) %>%
+  data.frame(.) %>%
+  group_by(Month) %>%
+  summarize(
+    eis.n = n(),
+    eis.median = median(time_eis, na.rm = TRUE),
+    eis.iqr = paste0(round(as.numeric(quantile(time_eis, probs=c(0.25), 
+                                               na.rm=TRUE)), 0),
+                     '-',
+                     round(as.numeric(quantile(time_eis, probs=c(0.75), 
+                                               na.rm=TRUE)), 0)),
+    eis.min.max = paste0(min(time_eis),'-',max(time_eis))
+  ) %>%
+  mutate(Month = format(as.Date(Month), '%b %Y'),
+         eis.n = ifelse(is.na(eis.median), 0, eis.n),
+         eis.median = ifelse(is.na(eis.median), '-', eis.median),
+         eis.iqr = str_replace_all(eis.iqr, 'NA', ''),
+         eis.iqr = ifelse(eis.n==1, '-', eis.iqr),
+         eis.min.max = str_replace_all(eis.min.max, 'NA', ''),
+         eis.min.max = ifelse(eis.n==1, '-', eis.min.max))
+# eis.timeliness
+
+
+# DON timeliness
+don.timeliness <- merge(
+  data.frame(Month = months),
+  df_don_time_region %>% 
+    select(DON_pub_year_month, time_don),
+  by.x='Month', 
+  by.y='DON_pub_year_month'
+) %>%
+  data.frame(.) %>%
+  group_by(Month) %>%
+  summarize(
+    don.n = n(),
+    don.median = median(time_don, na.rm = TRUE),
+    don.iqr = paste0(round(as.numeric(quantile(time_don, probs=c(0.25), 
+                                               na.rm=TRUE)), 0),
+                     '-',
+                     round(as.numeric(quantile(time_don, probs=c(0.75), 
+                                               na.rm=TRUE)), 0)),
+    don.min.max = paste0(min(time_don),'-',max(time_don))
+  ) %>%
+  mutate(Month = format(as.Date(Month), '%b %Y'),
+         don.n = ifelse(is.na(don.median), 0, don.n),
+         don.median = ifelse(is.na(don.median), '-', don.median),
+         don.iqr = str_replace_all(don.iqr, 'NA', ''),
+         don.iqr = ifelse(don.n==1, '-', don.iqr),
+         don.min.max = str_replace_all(don.min.max, 'NA', ''),
+         don.min.max = ifelse(don.n==1, '-', don.min.max))
+# don.timeliness
+
+
+# Timeliness all
+cbind(rra.timeliness,
+      eis.timeliness %>% select(-Month),
+      don.timeliness %>% select(-Month)) %>%
+  flextable() %>%
+  set_header_labels(values = list(
+    rra.n = 'N',
+    rra.median = 'Median',
+    rra.iqr = 'IQR',
+    rra.min.max = 'Min-Max',
+    eis.n = 'N',
+    eis.median = 'Median',
+    eis.iqr = 'IQR',
+    eis.min.max = 'Min-Max',
+    don.n = 'N',
+    don.median = 'Median',
+    don.iqr = 'IQR',
+    don.min.max = 'Min-Max'
+  )) %>%
+  flextable::align(j=2:10, align='center', part='all') %>%
+  add_header_row(values = c('', 'RRA','RRA','RRA','RRA',
+                            'EIS','EIS','EIS','EIS',
+                            'DON','DON','DON','DON'), top = TRUE) %>%
+  merge_h(part = 'header') %>%
+  width(j=1, width=2)
+
+```
+
+
+
+
+```{r, eval=FALSE}
+# , eval=(selected.region!='Global')
+knitr::asis_output('## RRA timeliness')
+
+```
+
+```{r, eval=FALSE}
+# RRA
+# create Figure over time in the last 7 months since May 2022
+Fig_RRA_time_region_box <- df_rra_time_region  %>% 
+  ggplot(aes(x=as.character(RRA_pub_year_month), y=as.numeric(time_rra))) +
+  geom_boxplot(fill='#0072B2') +
+  labs(x='Date', y='Time (days)') +
+  scale_y_continuous(breaks=seq(0, 110, 20)) +  # Ticks from 0-60, every 5
+  theme_bw() +
+  theme(axis.text.x=element_text(angle=45, hjust=1))
+
+knitr::knit_print(Fig_RRA_time_region_box)
+
+# Time between decision and publication - median and IQR Aug 2022
+# df_rra_region_time %>% filter(RRA_pub_year_month!='1990-01-01') %>%   filter(RRA_pub_year_month>'2022-03-01' & RRA_pub_year_month<'2022-11-01') %>% 
+#   group_by(RRA_pub_year_month) %>% mutate(median=median(time_rra), Q25 = quantile(time_rra, probs = 0.25), Q75 = quantile(time_rra, probs = 0.75)) %>% select(RRA_pub_year_month, time_rra, median, Q25, Q75)
+```
+
+
+
+```{r, eval=FALSE}
+knitr::asis_output('## EIS timeliness')
+
+```
+
+```{r, eval=FALSE}
+# create Figure over time in the last 7 months since May 2022
+Fig_EIS_time_region_box <- df_eis_time_region %>% 
+  ggplot(aes(x=as.character(EIS_pub_year_month), y=as.numeric(time_eis))) +
+  geom_boxplot(fill='#0072B2') +
+  labs(x='Date', y='Time (days)') +
+  # scale_y_continuous(breaks=seq(0, 80, 5)) +  # Ticks from 0-60, every 5
+  theme_bw() +
+  theme(axis.text.x=element_text(angle=45, hjust=1))
+
+Fig_EIS_time_region_box
+
+# Time between decision and publication - median and IQR May 2022
+# df_eis_time_region %>% filter(EIS_pub_year_month!='1990-01-01')%>% filter(EIS_pub_year_month>'2022-03-01' & EIS_pub_year_month<'2022-11-01') %>% group_by(EIS_pub_year_month) %>% mutate(median=median(time_eis), Q25 = quantile(time_eis, probs = 0.25), Q75 = quantile(time_eis, probs = 0.75)) %>% select(EIS_pub_year_month, time_eis, median, Q25, Q75)
+```
+
+
+```{r, eval=FALSE}
+knitr::asis_output('## DON timeliness')
+```
+
+```{r, eval=FALSE}
+# create Figure over time in the last 7 months since May 2022
+Fig_DON_time_box_region <-  df_don_time_region %>% 
+  ggplot(aes(x=as.character(DON_pub_year_month), y=as.numeric(time_don))) +
+  geom_boxplot(fill='#0072B2') +
+  labs(x='Date', y='Time (days)') +
+  scale_y_continuous(breaks=seq(0, 45, 5)) +  # Ticks from 0-60, every 5
+  theme_bw() +
+  theme(axis.text.x=element_text(angle=45, hjust=1))
+
+Fig_DON_time_box_region
+
+# Time between decision and publication - median and IQR May 2022
+# df_don_time_region %>%filter(status=='Published') %>% group_by(DON_pub_year_month) %>% mutate(median=median(time_don), Q25 = quantile(time_don, probs = 0.25), Q75 = quantile(time_don, probs = 0.75)) %>% select(DON_pub_year_month, time_don, median, Q25, Q75)
+
+```
+

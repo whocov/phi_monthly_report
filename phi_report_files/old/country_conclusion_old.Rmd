@@ -1,0 +1,21 @@
+## **WHO `r selected.region` deep dive - Take home messages**
+
+1. Information products for acute public health **events** in the **`r selected.region` Region only** in the period `r format(as.Date(as.yearmon(report.month)) %m-% months(6), '%b %Y')` – `r format(as.Date(as.yearmon(report.month)), '%b %Y')` were related to **(EDIT) XXX**.
+
+2. During the time period, **`r selected.region` also contributed** to **several multi-region and global information products related to (EDIT XXX)**
+
+3. **In addition, a multitude of other (weekly/recurrent) information products, including situation reports and analytics or dashboards, are ongoing.**
+
+4. A **key** area of **focus** is the **(EDIT) XXX**
+
+
+
+## **WHO `r selected.region` deep dive – Contact and further reading**
+
+**Questions/contact:**
+If any further questions about the **PHI/DVA work** done by colleagues in the **WHO `r selected.region`**, please contact **(EDIT) XXX** (XXX@who.int) and **(EDIT) XXX** (XXX@who.int) or `r selected.region` Outbreak (XXX@who.int)
+
+\ 
+
+**Further reading**
+For further details on the PHI/DVA work by colleagues in the WHO `r selected.region`, please see the following reports, dashboards, and documents:

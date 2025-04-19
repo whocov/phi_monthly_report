@@ -1,0 +1,11 @@
+name: phi_report_shiny_app
+title: phi_report_shiny_app
+username:
+account: worldhealthorg
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 8998749
+bundleId: 10142478
+url: https://worldhealthorg.shinyapps.io/phi_report_shiny_app/
+asMultiple: FALSE
+asStatic: FALSE
