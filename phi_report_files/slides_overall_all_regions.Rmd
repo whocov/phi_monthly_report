@@ -1121,13 +1121,13 @@ df_fig_dy_count$disease <- factor(df_fig_dy_count$disease,
 fig_heatmap_prod <- df_fig_dy_count %>% 
   ggplot(aes(pub_year_month, disease, fill=Number)) +
   geom_tile(color= "white",size=0.1) + 
-  scale_x_date(date_breaks = "1 month", date_labels = "%b %Y") +
+  scale_x_date(date_breaks = "2 month", date_labels = "%b %Y") +
   labs(x="", y="") +
   facet_wrap(.~product, nrow = 1) +
   scale_fill_gradient(low = "white", high = "#0072B2", n.breaks=6) +
   theme_bw() +
   theme(axis.ticks=element_blank(),
-        axis.text.x=element_text(angle=45, hjust=1.1, size=35),
+        axis.text.x=element_text(angle=90, hjust=1.1, size=35),
         axis.text.y=element_text(size=40),
         panel.grid.major = element_blank(),
         strip.text = element_text(size=40),
@@ -1180,7 +1180,7 @@ seq_dates_month <- format(seq.Date(as.Date(as.yearmon(report.month)) %m-% months
 line_data <- data.frame(
   x = rep(c(-0.5, 8), 3),
   y = c(rep(7, 2), rep(14, 2), rep(21, 2)),
-  group = factor(rep(c("National 7-day cutoff", "Regional 14-day cutoff", "Global 21-day cutoff"), each = 2),  levels = c("National 7-day cutoff", "Regional 14-day cutoff", "Global 21-day cutoff")))
+  group = factor(rep(c("National 7-day target time", "Regional 14-day target time", "Global 21-day target time"), each = 2),  levels = c("National 7-day target time", "Regional 14-day target time", "Global 21-day target time")))
 
 
 # Create dotplot (former boxplot)
